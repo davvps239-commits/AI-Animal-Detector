@@ -1,0 +1,285 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>AI Smart Animal Detector</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #eaf4ff;
+  text-align: center;
+  padding: 20px;
+}
+
+.container {
+  max-width: 650px;
+  margin: auto;
+  background: white;
+  padding: 25px;
+  border-radius: 18px;
+  box-shadow: 0 4px 15px #bbb;
+}
+
+h1 { color: #1769aa; }
+
+button {
+  padding: 12px 22px;
+  margin: 8px;
+  border: none;
+  border-radius: 8px;
+  background: #1769aa;
+  color: white;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#webcam-container canvas {
+  width: 100%;
+  max-width: 400px;
+  border-radius: 12px;
+  margin-top: 15px;
+}
+
+#result {
+  font-size: 28px;
+  color: #087c40;
+  font-weight: bold;
+  margin: 20px;
+}
+
+#status {
+  color: #555;
+  font-size: 14px;
+}
+
+.prediction {
+  background: #edf5ff;
+  margin: 8px;
+  padding: 10px;
+  border-radius: 8px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>🐾 AI Smart Camera</h1>
+
+<p>Show an animal in front of your camera.</p>
+
+<button id="startBtn" onclick="startCamera()">
+Start Camera
+</button>
+
+<button id="stopBtn" onclick="stopCamera()" disabled>
+Stop Camera
+</button>
+
+<button onclick="speakResult()">
+🔊 Speak Result
+</button>
+
+<div id="status">Loading ready...</div>
+
+<div id="webcam-container"></div>
+
+<h2>AI Detection Result</h2>
+
+<div id="result">Waiting for camera...</div>
+
+<div id="predictions"></div>
+
+</div>
+
+<script>
+
+// Model folder location
+const URL = "./my_model/";
+
+let model;
+let webcam;
+let running = false;
+let lastSpoken = "";
+let lastSpeechTime = 0;
+let currentResult = "";
+
+// Load AI model
+async function loadModel() {
+  try {
+    document.getElementById("status").innerText =
+      "Loading AI Model...";
+
+    model = await tmImage.load(
+      URL + "model.json",
+      URL + "metadata.json"
+    );
+
+    document.getElementById("status").innerText =
+      "AI Model Loaded Successfully!";
+
+  } catch (error) {
+    console.error(error);
+
+    document.getElementById("status").innerText =
+      "Model Error: Check my_model files and paths.";
+  }
+}
+
+// Start laptop camera
+async function startCamera() {
+
+  if (!model) {
+    await loadModel();
+  }
+
+  if (!model) return;
+
+  try {
+    document.getElementById("status").innerText =
+      "Opening Camera...";
+
+    webcam = new tmImage.Webcam(400, 300, true);
+
+    await webcam.setup();
+    await webcam.play();
+
+    running = true;
+
+    document.getElementById("webcam-container")
+      .innerHTML = "";
+
+    document.getElementById("webcam-container")
+      .appendChild(webcam.canvas);
+
+    document.getElementById("startBtn").disabled = true;
+    document.getElementById("stopBtn").disabled = false;
+
+    document.getElementById("status").innerText =
+      "Camera and AI are running!";
+
+    window.requestAnimationFrame(loop);
+
+  } catch (error) {
+    console.error(error);
+
+    document.getElementById("status").innerText =
+      "Camera Error: Allow permission and use HTTPS or localhost.";
+  }
+}
+
+// AI prediction loop
+async function loop() {
+
+  if (!running) return;
+
+  webcam.update();
+
+  const predictions = await model.predict(webcam.canvas);
+
+  predictions.sort(
+    (a, b) => b.probability - a.probability
+  );
+
+  const best = predictions[0];
+
+  if (best.probability >= 0.65 &&
+      best.className.toUpperCase() !== "UNKNOWN") {
+
+    currentResult = best.className;
+
+    document.getElementById("result").innerText =
+      "🐾 " + best.className.toUpperCase() +
+      " (" + (best.probability * 100).toFixed(1) + "%)";
+
+    // Speak only when result changes
+    const now = Date.now();
+
+    if (best.className !== lastSpoken &&
+        now - lastSpeechTime > 3000) {
+
+      speakResult();
+
+      lastSpoken = best.className;
+      lastSpeechTime = now;
+    }
+
+  } else {
+    currentResult = "";
+
+    document.getElementById("result").innerText =
+      "Not sure - Show another image";
+  }
+
+  // Show all class predictions
+  document.getElementById("predictions").innerHTML =
+    predictions.map(p =>
+      `<div class="prediction">
+      ${p.className}: ${(p.probability * 100).toFixed(1)}%
+      </div>`
+    ).join("");
+
+  window.requestAnimationFrame(loop);
+}
+
+// Voice output
+function speakResult() {
+
+  if (!currentResult) return;
+
+  window.speechSynthesis.cancel();
+
+  const message = new SpeechSynthesisUtterance(
+    "This is a " + currentResult
+  );
+
+  message.lang = "en-US";
+  message.rate = 0.9;
+
+  window.speechSynthesis.speak(message);
+}
+
+// Stop camera
+function stopCamera() {
+
+  running = false;
+
+  if (webcam) {
+    webcam.stop();
+  }
+
+  window.speechSynthesis.cancel();
+
+  document.getElementById("webcam-container")
+    .innerHTML = "";
+
+  document.getElementById("startBtn").disabled = false;
+  document.getElementById("stopBtn").disabled = true;
+
+  document.getElementById("status").innerText =
+    "Camera Stopped";
+
+  document.getElementById("result").innerText =
+    "Camera is off";
+}
+
+// Load model when page opens
+loadModel();
+
+</script>
+
+</body>
+</html>
